@@ -1,72 +1,89 @@
 const express = require("express");
-const mongoose = require("mongoose");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const http = require("http");
 const { Server } = require("socket.io");
 
-// Load environment variables
+const connectDB = require("./config/db");
+
 dotenv.config();
 
-// Initialize app
 const app = express();
 const server = http.createServer(app);
-
-// Socket.io setup
-const io = new Server(server, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
-    }
-});
-
-// Middleware
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
 // =========================
 // Database Connection
 // =========================
-mongoose.connect(process.env.MONGODB_URL)
-    .then(() => console.log("✅ MongoDB Connected Successfully"))
-    .catch((err) => console.log("❌ MongoDB Connection Failed:", err));
+connectDB();
+
+// =========================
+// Socket.io Setup
+// =========================
+const io = new Server(server, {
+    cors: {
+        origin: process.env.CLIENT_URL || "*",
+        methods: ["GET", "POST", "PUT", "DELETE"]
+    }
+});
+
+// =========================
+// Middleware
+// =========================
+app.use(
+    cors({
+        origin: process.env.CLIENT_URL || "*",
+        credentials: true
+    })
+);
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // =========================
 // Basic Test Route
 // =========================
 app.get("/", (req, res) => {
-    res.send("🔥 ApexFit Backend is Running...");
+    res.status(200).json({
+        success: true,
+        message: "🔥 Apex-Fit Backend is Running..."
+    });
 });
 
 // =========================
-// Routes (ADD YOUR ROUTES HERE LATER)
+// API Routes
 // =========================
-// Example:
-// app.use("/api/auth", require("./routes/authRoutes"));
-// app.use("/api/users", require("./routes/userRoutes"));
-// app.use("/api/coaches", require("./routes/coachRoutes"));
+app.use("/api/auth", require("./routes/authRoutes"));
+app.use("/api/users", require("./routes/userRoutes"));
+app.use("/api/dashboard", require("./routes/dashboardRoutes"));
 
 // =========================
 // Socket.io Chat System
+// Future Coach Marketplace Chat
 // =========================
 io.on("connection", (socket) => {
     console.log("🟢 User connected:", socket.id);
 
-    // Join user room
     socket.on("join_room", (room) => {
         socket.join(room);
         console.log(`User joined room: ${room}`);
     });
 
-    // Send message
     socket.on("send_message", (data) => {
         socket.to(data.room).emit("receive_message", data);
     });
 
-    // Disconnect
     socket.on("disconnect", () => {
         console.log("🔴 User disconnected:", socket.id);
+    });
+});
+
+// =========================
+// 404 Route
+// =========================
+app.use((req, res) => {
+    res.status(404).json({
+        success: false,
+        message: "API route not found."
     });
 });
 
@@ -76,5 +93,5 @@ io.on("connection", (socket) => {
 const PORT = process.env.PORT || 8070;
 
 server.listen(PORT, () => {
-    console.log(`🚀 ApexFit Server running on port ${PORT}`);
+    console.log(`🚀 Apex-Fit Server running on port ${PORT}`);
 });
