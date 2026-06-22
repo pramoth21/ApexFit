@@ -1,3 +1,5 @@
+const Meal = require("../models/Meal");
+
 const calculateBMI = (weight, height) => {
     if (!weight || !height) return null;
 
@@ -83,42 +85,117 @@ const getAgeGroup = (age) => {
     return "Senior";
 };
 
-const getBasicRecommendations = (user) => {
+const getBasicRecommendations = (user, nutritionSummary, calories) => {
     const recommendations = [];
 
-    if (user.goal === "Weight Loss") {
-        recommendations.push("Focus on a calorie deficit with high-protein meals.");
-        recommendations.push("Add cardio workouts 3-5 times per week.");
-        recommendations.push("Track daily calories consistently.");
+    if (!user.profileCompleted) {
+        recommendations.push("Complete your profile to receive personalized recommendations.");
+        return recommendations;
     }
 
-    if (user.goal === "Weight Gain") {
-        recommendations.push("Eat in a calorie surplus with nutrient-dense foods.");
-        recommendations.push("Increase meal frequency if appetite is low.");
-        recommendations.push("Focus on progressive strength training.");
+    if (calories && nutritionSummary.totalCalories > calories.recommendedCalories) {
+        recommendations.push("You exceeded your calorie target today. Reduce high-calorie snacks.");
+    }
+
+    if (calories && nutritionSummary.totalCalories < calories.recommendedCalories * 0.7) {
+        recommendations.push("Your calorie intake is low today. Add a balanced meal or protein source.");
+    }
+
+    if (nutritionSummary.totalProtein < 80 && user.goal === "Muscle Gain") {
+        recommendations.push("Protein intake is low for muscle gain. Add chicken, eggs, fish, milk, or whey.");
+    }
+
+    if (user.goal === "Weight Loss") {
+        recommendations.push("Focus on lean protein, vegetables, and controlled carbohydrate portions.");
     }
 
     if (user.goal === "Muscle Gain") {
-        recommendations.push("Maintain a small calorie surplus.");
-        recommendations.push("Consume enough protein daily.");
-        recommendations.push("Prioritize compound lifts and recovery.");
-    }
-
-    if (user.goal === "Maintenance") {
-        recommendations.push("Keep calories close to maintenance level.");
-        recommendations.push("Balance strength training and cardio.");
-        recommendations.push("Monitor weekly weight changes.");
+        recommendations.push("Maintain a small calorie surplus and keep protein consistent.");
     }
 
     if (user.age >= 50) {
-        recommendations.push("Include calcium, vitamin D, and joint-friendly activities.");
+        recommendations.push("Include calcium, vitamin D, omega-3, and joint-friendly foods.");
     }
 
     if (recommendations.length === 0) {
-        recommendations.push("Complete your profile to receive personalized recommendations.");
+        recommendations.push("Good progress. Keep logging meals daily for better recommendations.");
     }
 
     return recommendations;
+};
+
+const getTodayDateRange = () => {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+
+    const end = new Date();
+    end.setHours(23, 59, 59, 999);
+
+    return { start, end };
+};
+
+const roundNumber = (num) => {
+    return Number(num.toFixed(2));
+};
+
+const getTodayNutritionSummary = async (userId) => {
+    const { start, end } = getTodayDateRange();
+
+    const meals = await Meal.find({
+        user: userId,
+        mealDate: {
+            $gte: start,
+            $lte: end
+        }
+    }).sort({ mealDate: 1 });
+
+    const summary = {
+        totalCalories: 0,
+        totalProtein: 0,
+        totalCarbs: 0,
+        totalFat: 0,
+        mealsLogged: meals.length,
+        breakfastCalories: 0,
+        lunchCalories: 0,
+        dinnerCalories: 0,
+        snackCalories: 0
+    };
+
+    meals.forEach((meal) => {
+        summary.totalCalories += meal.totalCalories;
+        summary.totalProtein += meal.totalProtein;
+        summary.totalCarbs += meal.totalCarbs;
+        summary.totalFat += meal.totalFat;
+
+        if (meal.mealType === "Breakfast") {
+            summary.breakfastCalories += meal.totalCalories;
+        }
+
+        if (meal.mealType === "Lunch") {
+            summary.lunchCalories += meal.totalCalories;
+        }
+
+        if (meal.mealType === "Dinner") {
+            summary.dinnerCalories += meal.totalCalories;
+        }
+
+        if (meal.mealType === "Snack") {
+            summary.snackCalories += meal.totalCalories;
+        }
+    });
+
+    return {
+        totalCalories: roundNumber(summary.totalCalories),
+        totalProtein: roundNumber(summary.totalProtein),
+        totalCarbs: roundNumber(summary.totalCarbs),
+        totalFat: roundNumber(summary.totalFat),
+        mealsLogged: summary.mealsLogged,
+        breakfastCalories: roundNumber(summary.breakfastCalories),
+        lunchCalories: roundNumber(summary.lunchCalories),
+        dinnerCalories: roundNumber(summary.dinnerCalories),
+        snackCalories: roundNumber(summary.snackCalories),
+        meals
+    };
 };
 
 // @desc    Get user dashboard
@@ -131,6 +208,10 @@ const getDashboard = async (req, res) => {
         const bmi = calculateBMI(user.weight, user.height);
         const calories = calculateDailyCalories(user);
         const ageGroup = getAgeGroup(user.age);
+        const nutritionSummary = await getTodayNutritionSummary(user._id);
+
+        const recommendedCalories = calories ? calories.recommendedCalories : 0;
+        const caloriesRemaining = recommendedCalories - nutritionSummary.totalCalories;
 
         return res.status(200).json({
             success: true,
@@ -161,19 +242,25 @@ const getDashboard = async (req, res) => {
                     recommendedCalories: null
                 },
 
-                todaySummary: {
-                    caloriesConsumed: 0,
-                    caloriesRemaining: calories
-                        ? calories.recommendedCalories
-                        : 0,
-                    proteinConsumed: 0,
-                    carbsConsumed: 0,
-                    fatConsumed: 0,
-                    workoutsCompleted: 0,
-                    waterIntakeLiters: 0
+                nutritionCards: {
+                    caloriesConsumed: nutritionSummary.totalCalories,
+                    caloriesRemaining,
+                    proteinConsumed: nutritionSummary.totalProtein,
+                    carbsConsumed: nutritionSummary.totalCarbs,
+                    fatConsumed: nutritionSummary.totalFat,
+                    mealsLogged: nutritionSummary.mealsLogged
                 },
 
-                recommendations: getBasicRecommendations(user)
+                mealBreakdown: {
+                    breakfastCalories: nutritionSummary.breakfastCalories,
+                    lunchCalories: nutritionSummary.lunchCalories,
+                    dinnerCalories: nutritionSummary.dinnerCalories,
+                    snackCalories: nutritionSummary.snackCalories
+                },
+
+                todayMeals: nutritionSummary.meals,
+
+                recommendations: getBasicRecommendations(user, nutritionSummary, calories)
             }
         });
     } catch (error) {
