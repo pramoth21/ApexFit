@@ -1,4 +1,5 @@
 const Meal = require("../models/Meal");
+const Workout = require("../models/Workout");
 
 const calculateBMI = (weight, height) => {
     if (!weight || !height) return null;
@@ -72,6 +73,7 @@ const calculateDailyCalories = (user) => {
     }
 
     return {
+        source: "Rule-Based Formula - temporary until Flask ML model is connected",
         bmr,
         maintenanceCalories,
         recommendedCalories
@@ -83,45 +85,6 @@ const getAgeGroup = (age) => {
     if (age >= 13 && age <= 25) return "Youth";
     if (age >= 26 && age <= 49) return "Adult";
     return "Senior";
-};
-
-const getBasicRecommendations = (user, nutritionSummary, calories) => {
-    const recommendations = [];
-
-    if (!user.profileCompleted) {
-        recommendations.push("Complete your profile to receive personalized recommendations.");
-        return recommendations;
-    }
-
-    if (calories && nutritionSummary.totalCalories > calories.recommendedCalories) {
-        recommendations.push("You exceeded your calorie target today. Reduce high-calorie snacks.");
-    }
-
-    if (calories && nutritionSummary.totalCalories < calories.recommendedCalories * 0.7) {
-        recommendations.push("Your calorie intake is low today. Add a balanced meal or protein source.");
-    }
-
-    if (nutritionSummary.totalProtein < 80 && user.goal === "Muscle Gain") {
-        recommendations.push("Protein intake is low for muscle gain. Add chicken, eggs, fish, milk, or whey.");
-    }
-
-    if (user.goal === "Weight Loss") {
-        recommendations.push("Focus on lean protein, vegetables, and controlled carbohydrate portions.");
-    }
-
-    if (user.goal === "Muscle Gain") {
-        recommendations.push("Maintain a small calorie surplus and keep protein consistent.");
-    }
-
-    if (user.age >= 50) {
-        recommendations.push("Include calcium, vitamin D, omega-3, and joint-friendly foods.");
-    }
-
-    if (recommendations.length === 0) {
-        recommendations.push("Good progress. Keep logging meals daily for better recommendations.");
-    }
-
-    return recommendations;
 };
 
 const getTodayDateRange = () => {
@@ -167,21 +130,10 @@ const getTodayNutritionSummary = async (userId) => {
         summary.totalCarbs += meal.totalCarbs;
         summary.totalFat += meal.totalFat;
 
-        if (meal.mealType === "Breakfast") {
-            summary.breakfastCalories += meal.totalCalories;
-        }
-
-        if (meal.mealType === "Lunch") {
-            summary.lunchCalories += meal.totalCalories;
-        }
-
-        if (meal.mealType === "Dinner") {
-            summary.dinnerCalories += meal.totalCalories;
-        }
-
-        if (meal.mealType === "Snack") {
-            summary.snackCalories += meal.totalCalories;
-        }
+        if (meal.mealType === "Breakfast") summary.breakfastCalories += meal.totalCalories;
+        if (meal.mealType === "Lunch") summary.lunchCalories += meal.totalCalories;
+        if (meal.mealType === "Dinner") summary.dinnerCalories += meal.totalCalories;
+        if (meal.mealType === "Snack") summary.snackCalories += meal.totalCalories;
     });
 
     return {
@@ -198,6 +150,92 @@ const getTodayNutritionSummary = async (userId) => {
     };
 };
 
+const getTodayWorkoutSummary = async (userId) => {
+    const { start, end } = getTodayDateRange();
+
+    const workouts = await Workout.find({
+        user: userId,
+        workoutDate: {
+            $gte: start,
+            $lte: end
+        }
+    }).sort({ workoutDate: 1 });
+
+    const summary = {
+        workoutsCompleted: workouts.length,
+        totalWorkoutDuration: 0,
+        totalCaloriesBurned: 0,
+        cardioMinutes: 0,
+        strengthMinutes: 0,
+        flexibilityMinutes: 0,
+        otherMinutes: 0
+    };
+
+    workouts.forEach((workout) => {
+        summary.totalWorkoutDuration += workout.duration;
+        summary.totalCaloriesBurned += workout.caloriesBurned;
+
+        if (workout.category === "Cardio") summary.cardioMinutes += workout.duration;
+        else if (workout.category === "Strength") summary.strengthMinutes += workout.duration;
+        else if (workout.category === "Flexibility") summary.flexibilityMinutes += workout.duration;
+        else summary.otherMinutes += workout.duration;
+    });
+
+    return {
+        workoutsCompleted: summary.workoutsCompleted,
+        totalWorkoutDuration: summary.totalWorkoutDuration,
+        totalCaloriesBurned: roundNumber(summary.totalCaloriesBurned),
+        cardioMinutes: summary.cardioMinutes,
+        strengthMinutes: summary.strengthMinutes,
+        flexibilityMinutes: summary.flexibilityMinutes,
+        otherMinutes: summary.otherMinutes,
+        workouts
+    };
+};
+
+const getBasicRecommendations = (user, nutritionSummary, workoutSummary, calories) => {
+    const recommendations = [];
+
+    if (!user.profileCompleted) {
+        recommendations.push("Complete your profile to receive personalized recommendations.");
+        return recommendations;
+    }
+
+    if (calories && nutritionSummary.totalCalories > calories.recommendedCalories) {
+        recommendations.push("You exceeded your calorie target today. Reduce high-calorie snacks.");
+    }
+
+    if (calories && nutritionSummary.totalCalories < calories.recommendedCalories * 0.7) {
+        recommendations.push("Your calorie intake is low today. Add a balanced meal or protein source.");
+    }
+
+    if (nutritionSummary.totalProtein < 80 && user.goal === "Muscle Gain") {
+        recommendations.push("Protein intake is low for muscle gain. Add chicken, eggs, fish, milk, or whey.");
+    }
+
+    if (workoutSummary.workoutsCompleted === 0) {
+        recommendations.push("No workout logged today. Add at least a short walk or strength session.");
+    }
+
+    if (workoutSummary.totalWorkoutDuration >= 30) {
+        recommendations.push("Good workout consistency today. Keep tracking your training.");
+    }
+
+    if (user.goal === "Weight Loss" && workoutSummary.cardioMinutes < 20) {
+        recommendations.push("For weight loss, try adding at least 20 minutes of cardio.");
+    }
+
+    if (user.goal === "Muscle Gain" && workoutSummary.strengthMinutes < 20) {
+        recommendations.push("For muscle gain, include strength training and progressive overload.");
+    }
+
+    if (recommendations.length === 0) {
+        recommendations.push("Good progress. Keep logging meals and workouts daily.");
+    }
+
+    return recommendations;
+};
+
 // @desc    Get user dashboard
 // @route   GET /api/dashboard
 // @access  Private
@@ -208,10 +246,13 @@ const getDashboard = async (req, res) => {
         const bmi = calculateBMI(user.weight, user.height);
         const calories = calculateDailyCalories(user);
         const ageGroup = getAgeGroup(user.age);
+
         const nutritionSummary = await getTodayNutritionSummary(user._id);
+        const workoutSummary = await getTodayWorkoutSummary(user._id);
 
         const recommendedCalories = calories ? calories.recommendedCalories : 0;
         const caloriesRemaining = recommendedCalories - nutritionSummary.totalCalories;
+        const netCalories = nutritionSummary.totalCalories - workoutSummary.totalCaloriesBurned;
 
         return res.status(200).json({
             success: true,
@@ -237,6 +278,7 @@ const getDashboard = async (req, res) => {
                 },
 
                 calorieSummary: calories || {
+                    source: "Not available",
                     bmr: null,
                     maintenanceCalories: null,
                     recommendedCalories: null
@@ -251,6 +293,23 @@ const getDashboard = async (req, res) => {
                     mealsLogged: nutritionSummary.mealsLogged
                 },
 
+                workoutCards: {
+                    workoutsCompleted: workoutSummary.workoutsCompleted,
+                    totalWorkoutDuration: workoutSummary.totalWorkoutDuration,
+                    caloriesBurned: workoutSummary.totalCaloriesBurned,
+                    cardioMinutes: workoutSummary.cardioMinutes,
+                    strengthMinutes: workoutSummary.strengthMinutes,
+                    flexibilityMinutes: workoutSummary.flexibilityMinutes,
+                    otherMinutes: workoutSummary.otherMinutes
+                },
+
+                energyBalance: {
+                    caloriesConsumed: nutritionSummary.totalCalories,
+                    caloriesBurnedFromWorkout: workoutSummary.totalCaloriesBurned,
+                    netCalories,
+                    calorieTarget: recommendedCalories
+                },
+
                 mealBreakdown: {
                     breakfastCalories: nutritionSummary.breakfastCalories,
                     lunchCalories: nutritionSummary.lunchCalories,
@@ -259,8 +318,14 @@ const getDashboard = async (req, res) => {
                 },
 
                 todayMeals: nutritionSummary.meals,
+                todayWorkouts: workoutSummary.workouts,
 
-                recommendations: getBasicRecommendations(user, nutritionSummary, calories)
+                recommendations: getBasicRecommendations(
+                    user,
+                    nutritionSummary,
+                    workoutSummary,
+                    calories
+                )
             }
         });
     } catch (error) {
