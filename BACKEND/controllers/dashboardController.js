@@ -1,5 +1,6 @@
 const Meal = require("../models/Meal");
 const Workout = require("../models/Workout");
+const WeightLog = require("../models/WeightLog");
 
 const calculateBMI = (weight, height) => {
     if (!weight || !height) return null;
@@ -93,6 +94,17 @@ const getTodayDateRange = () => {
 
     const end = new Date();
     end.setHours(23, 59, 59, 999);
+
+    return { start, end };
+};
+
+const getLastDaysRange = (days) => {
+    const end = new Date();
+    end.setHours(23, 59, 59, 999);
+
+    const start = new Date();
+    start.setDate(start.getDate() - Number(days) + 1);
+    start.setHours(0, 0, 0, 0);
 
     return { start, end };
 };
@@ -193,7 +205,38 @@ const getTodayWorkoutSummary = async (userId) => {
     };
 };
 
-const getBasicRecommendations = (user, nutritionSummary, workoutSummary, calories) => {
+const getProgressSummary = async (userId) => {
+    const { start, end } = getLastDaysRange(30);
+
+    const logs = await WeightLog.find({
+        user: userId,
+        logDate: {
+            $gte: start,
+            $lte: end
+        }
+    }).sort({ logDate: 1 });
+
+    const latestLog = await WeightLog.findOne({
+        user: userId
+    }).sort({ logDate: -1 });
+
+    const firstWeight = logs.length > 0 ? logs[0].weight : null;
+    const latestWeight = latestLog ? latestLog.weight : null;
+
+    const weightChange30Days = firstWeight !== null && latestWeight !== null
+        ? roundNumber(latestWeight - firstWeight)
+        : null;
+
+    return {
+        latestWeight,
+        firstWeightInRange: firstWeight,
+        weightChange30Days,
+        totalWeightLogs: logs.length,
+        latestLogDate: latestLog ? latestLog.logDate : null
+    };
+};
+
+const getBasicRecommendations = (user, nutritionSummary, workoutSummary, progressSummary, calories) => {
     const recommendations = [];
 
     if (!user.profileCompleted) {
@@ -217,10 +260,6 @@ const getBasicRecommendations = (user, nutritionSummary, workoutSummary, calorie
         recommendations.push("No workout logged today. Add at least a short walk or strength session.");
     }
 
-    if (workoutSummary.totalWorkoutDuration >= 30) {
-        recommendations.push("Good workout consistency today. Keep tracking your training.");
-    }
-
     if (user.goal === "Weight Loss" && workoutSummary.cardioMinutes < 20) {
         recommendations.push("For weight loss, try adding at least 20 minutes of cardio.");
     }
@@ -229,8 +268,20 @@ const getBasicRecommendations = (user, nutritionSummary, workoutSummary, calorie
         recommendations.push("For muscle gain, include strength training and progressive overload.");
     }
 
+    if (progressSummary.totalWeightLogs === 0) {
+        recommendations.push("Add your first weight log to track your progress trend.");
+    }
+
+    if (user.goal === "Weight Loss" && progressSummary.weightChange30Days !== null && progressSummary.weightChange30Days > 0) {
+        recommendations.push("Your weight increased in the last 30 days. Review calorie intake and activity level.");
+    }
+
+    if (user.goal === "Muscle Gain" && progressSummary.weightChange30Days !== null && progressSummary.weightChange30Days < 0) {
+        recommendations.push("Your weight decreased in the last 30 days. Increase calories and protein for muscle gain.");
+    }
+
     if (recommendations.length === 0) {
-        recommendations.push("Good progress. Keep logging meals and workouts daily.");
+        recommendations.push("Good progress. Keep logging meals, workouts, and weight consistently.");
     }
 
     return recommendations;
@@ -249,6 +300,7 @@ const getDashboard = async (req, res) => {
 
         const nutritionSummary = await getTodayNutritionSummary(user._id);
         const workoutSummary = await getTodayWorkoutSummary(user._id);
+        const progressSummary = await getProgressSummary(user._id);
 
         const recommendedCalories = calories ? calories.recommendedCalories : 0;
         const caloriesRemaining = recommendedCalories - nutritionSummary.totalCalories;
@@ -303,6 +355,14 @@ const getDashboard = async (req, res) => {
                     otherMinutes: workoutSummary.otherMinutes
                 },
 
+                progressCards: {
+                    latestWeight: progressSummary.latestWeight,
+                    firstWeightInRange: progressSummary.firstWeightInRange,
+                    weightChange30Days: progressSummary.weightChange30Days,
+                    totalWeightLogs: progressSummary.totalWeightLogs,
+                    latestLogDate: progressSummary.latestLogDate
+                },
+
                 energyBalance: {
                     caloriesConsumed: nutritionSummary.totalCalories,
                     caloriesBurnedFromWorkout: workoutSummary.totalCaloriesBurned,
@@ -324,6 +384,7 @@ const getDashboard = async (req, res) => {
                     user,
                     nutritionSummary,
                     workoutSummary,
+                    progressSummary,
                     calories
                 )
             }
