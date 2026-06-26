@@ -16,24 +16,32 @@ const workoutSchema = new mongoose.Schema(
 
         exerciseName: {
             type: String,
-            required: true
+            required: true,
+            trim: true
         },
 
         category: {
             type: String,
+            enum: ["Cardio", "Strength", "Flexibility", "Balance", "Sports", "Other"],
             default: "Other"
         },
 
         duration: {
             type: Number,
-            required: [true, "Workout duration is required"],
-            min: [1, "Duration must be at least 1 minute"]
+            required: true,
+            min: 1
         },
 
         caloriesBurned: {
             type: Number,
             required: true,
             min: 0
+        },
+
+        caloriePredictionSource: {
+            type: String,
+            enum: ["Formula", "ML Model", "Manual"],
+            default: "Formula"
         },
 
         intensity: {
@@ -64,7 +72,7 @@ const workoutSchema = new mongoose.Schema(
 
         distanceUnit: {
             type: String,
-            enum: ["km", "miles", "none"],
+            enum: ["km", "miles", "meters", "none"],
             default: "none"
         },
 
@@ -75,6 +83,7 @@ const workoutSchema = new mongoose.Schema(
 
         notes: {
             type: String,
+            trim: true,
             default: ""
         }
     },

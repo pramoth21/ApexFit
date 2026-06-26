@@ -1,10 +1,37 @@
 # dependencies
 node_modules/
+**/node_modules/
+
+# python virtual environment
+.venv/
+**/.venv/
+venv/
+**/venv/
 
 # environment variables
 .env
+**/.env
+
+# python cache
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# pycharm
+.idea/
+**/.idea/
 
 # logs
-logs
+logs/
 *.log
 npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# optional build folders
+dist/
+build/
