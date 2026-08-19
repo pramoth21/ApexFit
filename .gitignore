@@ -35,3 +35,13 @@ Thumbs.db
 # optional build folders
 dist/
 build/
+
+# vscode
+.vscode/
+
+# python packaging/testing artifacts
+*.egg-info/
+.pytest_cache/
+
+# jupyter
+.ipynb_checkpoints/

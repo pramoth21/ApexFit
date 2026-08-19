@@ -1,3 +1,4 @@
+const axios = require("axios");
 const WeightLog = require("../models/WeightLog");
 const Meal = require("../models/Meal");
 const Workout = require("../models/Workout");
@@ -55,6 +56,62 @@ const buildEmptyDailyMap = (start, end) => {
 
     return dayMap;
 };
+
+// ============ NEW: helpers for AI weight prediction ============
+
+const LBS_PER_KG = 2.20462;
+
+const kgToLbs = (kg) => kg * LBS_PER_KG;
+const lbsToKg = (lbs) => lbs / LBS_PER_KG;
+
+const calculateBMR = (user) => {
+    // Mifflin-St Jeor formula — requires weight in kg, height in cm
+    const { gender, weight, height, age } = user;
+    if (!gender || !weight || !height || !age) return null;
+
+    if (gender === "Male") {
+        return Math.round(10 * weight + 6.25 * height - 5 * age + 5);
+    }
+    if (gender === "Female") {
+        return Math.round(10 * weight + 6.25 * height - 5 * age - 161);
+    }
+    return Math.round(10 * weight + 6.25 * height - 5 * age);
+};
+
+const getActivityMultiplier = (activityLevel) => {
+    const multipliers = {
+        Sedentary: 1.2,
+        Light: 1.375,
+        Moderate: 1.55,
+        Active: 1.725,
+        "Very Active": 1.9
+    };
+    return multipliers[activityLevel] || 1.55;
+};
+
+const mapActivityLevelForAI = (activityLevel) => {
+    const map = {
+        Sedentary: "Sedentary",
+        Light: "Lightly Active",
+        Moderate: "Moderately Active",
+        Active: "Moderately Active",
+        "Very Active": "Very Active"
+    };
+    return map[activityLevel] || "Moderately Active";
+};
+
+const getTodayCaloriesConsumed = async (userId) => {
+    const { start, end } = getDateRange();
+
+    const meals = await Meal.find({
+        user: userId,
+        mealDate: { $gte: start, $lte: end }
+    });
+
+    return meals.reduce((total, meal) => total + meal.totalCalories, 0);
+};
+
+// ============ END NEW helpers ============
 
 // @desc    Create weight log
 // @route   POST /api/progress/weight
@@ -176,6 +233,88 @@ const getWeightLogs = async (req, res) => {
         });
     }
 };
+
+// ============ NEW: AI weight prediction endpoint ============
+
+// @desc    Get AI-predicted weight for 7 and 30 days
+// @route   POST /api/progress/weight/predict
+// @access  Private
+const predictWeight = async (req, res) => {
+    try {
+        const user = req.user;
+
+        if (!user.age || !user.gender || !user.weight || !user.height) {
+            return res.status(400).json({
+                success: false,
+                message: "Complete your profile (age, gender, weight, height) before requesting a weight prediction."
+            });
+        }
+
+        const bmr = calculateBMR(user);
+        const maintenanceCalories = Math.round(bmr * getActivityMultiplier(user.activityLevel));
+        const dailyCaloriesConsumed = await getTodayCaloriesConsumed(user._id);
+        const dailyCalorieBalance = dailyCaloriesConsumed - maintenanceCalories;
+
+        const sleepQuality = req.body.sleepQuality || "Good";
+        const stressLevel = req.body.stressLevel !== undefined ? req.body.stressLevel : 5;
+
+        const currentWeightLbs = kgToLbs(user.weight);
+
+        const aiResponse = await axios.post(`${process.env.AI_SERVICE_URL}/predict-weight`, {
+            gender: user.gender,
+            age: user.age,
+            currentWeight: currentWeightLbs,
+            bmr,
+            dailyCaloriesConsumed,
+            dailyCalorieBalance,
+            activityLevel: mapActivityLevelForAI(user.activityLevel),
+            sleepQuality,
+            stressLevel
+        });
+
+        const prediction = aiResponse.data.prediction;
+
+        const predictedWeight7DaysKg = Number(lbsToKg(prediction.predictedWeight7Days).toFixed(2));
+        const predictedWeight30DaysKg = Number(lbsToKg(prediction.predictedWeight30Days).toFixed(2));
+
+        return res.status(200).json({
+            success: true,
+            message: "Weight prediction fetched successfully.",
+            prediction: {
+                currentWeightKg: user.weight,
+                dailyChangeRateLbs: prediction.dailyChangeRate,
+                predictedWeight7DaysKg,
+                predictedWeight30DaysKg,
+                predictedWeight7DaysLbs: prediction.predictedWeight7Days,
+                predictedWeight30DaysLbs: prediction.predictedWeight30Days,
+                modelSource: prediction.modelSource
+            },
+            inputsUsed: {
+                bmr,
+                maintenanceCalories,
+                dailyCaloriesConsumed,
+                dailyCalorieBalance,
+                sleepQuality,
+                stressLevel
+            }
+        });
+    } catch (error) {
+        if (error.response) {
+            return res.status(502).json({
+                success: false,
+                message: "AI service returned an error.",
+                error: error.response.data
+            });
+        }
+        return res.status(500).json({
+            success: false,
+            message: "Failed to get weight prediction.",
+            error: error.message
+        });
+    }
+};
+
+// ============ END NEW endpoint ============
 
 // @desc    Get single weight log
 // @route   GET /api/progress/weight/:id
@@ -511,5 +650,6 @@ module.exports = {
     updateWeightLog,
     deleteWeightLog,
     getProgressCharts,
-    getProgressSummary
+    getProgressSummary,
+    predictWeight
 };

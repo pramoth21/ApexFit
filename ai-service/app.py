@@ -1,27 +1,28 @@
 import os
 import joblib
 import pandas as pd
-
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, "models", "calorie_model.pkl")
+CALORIE_MODEL_PATH = os.path.join(BASE_DIR, "models", "calorie_model.pkl")
+WEIGHT_MODEL_PATH = os.path.join(BASE_DIR, "models", "weight_model.pkl")
 
 app = Flask(__name__)
 CORS(app)
 
 
-def load_model():
-    if not os.path.exists(MODEL_PATH):
-        raise FileNotFoundError("calorie_model.pkl not found. Train the model first.")
+def load_model(path, name):
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"{name} not found. Train the model first.")
+    return joblib.load(path)
 
-    return joblib.load(MODEL_PATH)
 
+calorie_package = load_model(CALORIE_MODEL_PATH, "calorie_model.pkl")
+calorie_model = calorie_package["model"]
 
-model_package = load_model()
-calorie_model = model_package["model"]
+weight_package = load_model(WEIGHT_MODEL_PATH, "weight_model.pkl")
+weight_model = weight_package["model"]
 
 
 @app.route("/", methods=["GET"])
@@ -31,7 +32,8 @@ def home():
         "message": "Apex-Fit AI Service is running",
         "endpoints": [
             "/model-info",
-            "/predict-calories"
+            "/predict-calories",
+            "/predict-weight"
         ]
     })
 
@@ -40,13 +42,26 @@ def home():
 def model_info():
     return jsonify({
         "success": True,
-        "modelName": model_package["model_name"],
-        "target": model_package["target"],
-        "features": model_package["features"],
-        "metrics": {
-            "mae": round(model_package["mae"], 2),
-            "rmse": round(model_package["rmse"], 2),
-            "r2": round(model_package["r2"], 4)
+        "calorieModel": {
+            "modelName": calorie_package["model_name"],
+            "target": calorie_package["target"],
+            "features": calorie_package["features"],
+            "metrics": {
+                "mae": round(calorie_package["mae"], 2),
+                "rmse": round(calorie_package["rmse"], 2),
+                "r2": round(calorie_package["r2"], 4)
+            }
+        },
+        "weightModel": {
+            "modelName": weight_package["model_name"],
+            "target": weight_package["target"],
+            "features": weight_package["features"],
+            "metrics": {
+                "mae": round(weight_package["mae"], 4),
+                "rmse": round(weight_package["rmse"], 4),
+                "r2": round(weight_package["r2"], 4),
+                "cvR2Mean": round(weight_package["cv_r2_mean"], 4)
+            }
         }
     })
 
@@ -55,7 +70,6 @@ def model_info():
 def predict_calories():
     try:
         data = request.get_json()
-
         if data is None:
             return jsonify({
                 "success": False,
@@ -63,17 +77,10 @@ def predict_calories():
             }), 400
 
         required_fields = [
-            "gender",
-            "age",
-            "height",
-            "weight",
-            "exerciseType",
-            "duration",
-            "intensity"
+            "gender", "age", "height", "weight",
+            "exerciseType", "duration", "intensity"
         ]
-
         missing_fields = [field for field in required_fields if field not in data]
-
         if missing_fields:
             return jsonify({
                 "success": False,
@@ -96,18 +103,16 @@ def predict_calories():
                 "message": "Age, height, weight, and duration must be greater than 0."
             }), 400
 
-        input_df = pd.DataFrame([
-            {
-                "Gender": gender,
-                "Age": age,
-                "Height": height,
-                "Weight": weight,
-                "Exercise_Type": exercise_type,
-                "Duration": duration,
-                "Intensity": intensity,
-                "Distance": distance
-            }
-        ])
+        input_df = pd.DataFrame([{
+            "Gender": gender,
+            "Age": age,
+            "Height": height,
+            "Weight": weight,
+            "Exercise_Type": exercise_type,
+            "Duration": duration,
+            "Intensity": intensity,
+            "Distance": distance
+        }])
 
         prediction = calorie_model.predict(input_df)[0]
         prediction = round(float(prediction), 2)
@@ -118,17 +123,12 @@ def predict_calories():
             "prediction": {
                 "caloriesBurned": prediction,
                 "unit": "kcal",
-                "modelSource": model_package["model_name"]
+                "modelSource": calorie_package["model_name"]
             },
             "input": {
-                "gender": gender,
-                "age": age,
-                "height": height,
-                "weight": weight,
-                "exerciseType": exercise_type,
-                "duration": duration,
-                "intensity": intensity,
-                "distance": distance
+                "gender": gender, "age": age, "height": height, "weight": weight,
+                "exerciseType": exercise_type, "duration": duration,
+                "intensity": intensity, "distance": distance
             }
         })
 
@@ -137,7 +137,96 @@ def predict_calories():
             "success": False,
             "message": "Invalid input. Numeric fields must be valid numbers."
         }), 400
+    except Exception as error:
+        return jsonify({
+            "success": False,
+            "message": "Prediction failed.",
+            "error": str(error)
+        }), 500
 
+
+@app.route("/predict-weight", methods=["POST"])
+def predict_weight():
+    try:
+        data = request.get_json()
+        if data is None:
+            return jsonify({
+                "success": False,
+                "message": "Request body must be JSON."
+            }), 400
+
+        required_fields = [
+            "gender",
+            "age",
+            "currentWeight",
+            "bmr",
+            "dailyCaloriesConsumed",
+            "dailyCalorieBalance",
+            "activityLevel",
+            "sleepQuality",
+            "stressLevel"
+        ]
+        missing_fields = [field for field in required_fields if field not in data]
+        if missing_fields:
+            return jsonify({
+                "success": False,
+                "message": "Missing required fields.",
+                "missingFields": missing_fields
+            }), 400
+
+        gender = str(data["gender"]).strip()
+        age = float(data["age"])
+        current_weight = float(data["currentWeight"])
+        bmr = float(data["bmr"])
+        daily_calories_consumed = float(data["dailyCaloriesConsumed"])
+        daily_calorie_balance = float(data["dailyCalorieBalance"])
+        activity_level = str(data["activityLevel"]).strip()
+        sleep_quality = str(data["sleepQuality"]).strip()
+        stress_level = float(data["stressLevel"])
+
+        if age <= 0 or current_weight <= 0 or bmr <= 0:
+            return jsonify({
+                "success": False,
+                "message": "Age, currentWeight, and bmr must be greater than 0."
+            }), 400
+
+        input_df = pd.DataFrame([{
+            "Gender": gender,
+            "Age": age,
+            "Current_Weight": current_weight,
+            "BMR": bmr,
+            "Daily_Calories_Consumed": daily_calories_consumed,
+            "Daily_Calorie_Balance": daily_calorie_balance,
+            "Activity_Level": activity_level,
+            "Sleep_Quality": sleep_quality,
+            "Stress_Level": stress_level
+        }])
+
+        daily_rate = weight_model.predict(input_df)[0]
+        daily_rate = float(daily_rate)
+
+        predicted_7_day = round(current_weight + (daily_rate * 7), 2)
+        predicted_30_day = round(current_weight + (daily_rate * 30), 2)
+
+        return jsonify({
+            "success": True,
+            "message": "Weight prediction successful.",
+            "prediction": {
+                "currentWeight": current_weight,
+                "dailyChangeRate": round(daily_rate, 4),
+                "predictedWeight7Days": predicted_7_day,
+                "predictedWeight30Days": predicted_30_day,
+                "unit": "lbs",
+                "modelSource": weight_package["model_name"]
+            },
+            "input": data
+        })
+
+    except ValueError:
+        return jsonify({
+            "success": False,
+            "message": "Invalid input. Numeric fields must be valid numbers."
+        }), 400
     except Exception as error:
         return jsonify({
             "success": False,

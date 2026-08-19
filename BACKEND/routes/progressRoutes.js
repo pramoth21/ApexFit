@@ -7,7 +7,8 @@ const {
     updateWeightLog,
     deleteWeightLog,
     getProgressCharts,
-    getProgressSummary
+    getProgressSummary,
+    predictWeight
 } = require("../controllers/progressController");
 
 const { protect } = require("../middleware/authMiddleware");
@@ -20,6 +21,8 @@ router.get("/summary", protect, getProgressSummary);
 router.route("/weight")
     .post(protect, createWeightLog)
     .get(protect, getWeightLogs);
+
+router.post("/weight/predict", protect, predictWeight);
 
 router.route("/weight/:id")
     .get(protect, getWeightLogById)
