@@ -3,7 +3,7 @@ const cors = require("cors");
 const dotenv = require("dotenv");
 const http = require("http");
 const { Server } = require("socket.io");
-
+const path = require("path");
 const connectDB = require("./config/db");
 
 dotenv.config();
@@ -38,6 +38,7 @@ app.use(
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // =========================
 // Basic Test Route
@@ -60,6 +61,7 @@ app.use("/api/meals", require("./routes/mealRoutes"));
 app.use("/api/exercises", require("./routes/exerciseRoutes"));
 app.use("/api/workouts", require("./routes/workoutRoutes"));
 app.use("/api/progress", require("./routes/progressRoutes"));
+app.use("/api/supplements", require("./routes/supplementRoutes"));
 
 // =========================
 // Socket.io Chat System
