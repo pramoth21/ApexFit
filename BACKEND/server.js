@@ -62,6 +62,7 @@ app.use("/api/exercises", require("./routes/exerciseRoutes"));
 app.use("/api/workouts", require("./routes/workoutRoutes"));
 app.use("/api/progress", require("./routes/progressRoutes"));
 app.use("/api/supplements", require("./routes/supplementRoutes"));
+app.use("/api/recipes", require("./routes/recipeRoutes"));
 
 // =========================
 // Socket.io Chat System
