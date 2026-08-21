@@ -5,6 +5,7 @@ const http = require("http");
 const { Server } = require("socket.io");
 const path = require("path");
 const connectDB = require("./config/db");
+const initSocketServer = require("./socket/socketServer");
 
 dotenv.config();
 
@@ -25,6 +26,8 @@ const io = new Server(server, {
         methods: ["GET", "POST", "PUT", "DELETE"]
     }
 });
+
+initSocketServer(io);
 
 // =========================
 // Middleware
@@ -63,27 +66,10 @@ app.use("/api/workouts", require("./routes/workoutRoutes"));
 app.use("/api/progress", require("./routes/progressRoutes"));
 app.use("/api/supplements", require("./routes/supplementRoutes"));
 app.use("/api/recipes", require("./routes/recipeRoutes"));
-
-// =========================
-// Socket.io Chat System
-// Future Coach Marketplace Chat
-// =========================
-io.on("connection", (socket) => {
-    console.log("🟢 User connected:", socket.id);
-
-    socket.on("join_room", (room) => {
-        socket.join(room);
-        console.log(`User joined room: ${room}`);
-    });
-
-    socket.on("send_message", (data) => {
-        socket.to(data.room).emit("receive_message", data);
-    });
-
-    socket.on("disconnect", () => {
-        console.log("🔴 User disconnected:", socket.id);
-    });
-});
+app.use("/api/feedback", require("./routes/feedbackRoutes"));
+app.use("/api/coaches", require("./routes/coachRoutes"));
+app.use("/api/bookings", require("./routes/bookingRoutes"));
+app.use("/api/messages", require("./routes/messageRoutes"));
 
 // =========================
 // 404 Route
